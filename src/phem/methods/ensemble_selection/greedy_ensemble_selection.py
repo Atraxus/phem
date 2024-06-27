@@ -46,8 +46,11 @@ class EnsembleSelection(AbstractWeightedEnsemble):
         n_jobs: int = -1,
         random_state: int | np.random.RandomState | None = None,
         use_best: bool = True,
+        loss_weight: float = 1.0
     ) -> None:
         # base_models = base_models[:20]
+        self.loss_weight = loss_weight
+        self.time_weight = 1 - loss_weight
 
         super().__init__(base_models, "predict_proba")
         self.ensemble_size = n_iterations
@@ -113,6 +116,10 @@ class EnsembleSelection(AbstractWeightedEnsemble):
             weighted_ensemble_prediction.shape,
             dtype=np.float64,
         )
+        
+        # Pre-build the times array from the base models' metadata
+        times = np.array([model.model_metadata['val_predict_time'] for model in self.base_models])
+
 
         for _i in range(ensemble_size):
             # print(i)
@@ -156,8 +163,16 @@ class EnsembleSelection(AbstractWeightedEnsemble):
             # print("LOSSES ",losses)
 
             # -- Eval Iteration results
-            all_best = np.argwhere(losses == np.nanmin(losses)).flatten()
+            # all_best = np.argwhere(losses == np.nanmin(losses)).flatten()
+            
+            # TEMP
+            
+            normalized_losses = (losses - np.nanmin(losses)) / (np.nanmax(losses) - np.nanmin(losses))
+            normalized_times = (times - np.nanmin(times)) / (np.nanmax(times) - np.nanmin(times))
+            combined_scores = self.loss_weight * normalized_losses + self.time_weight * normalized_times
 
+            min_combined_score = np.nanmin(combined_scores)
+            all_best = np.argwhere(combined_scores == min_combined_score).flatten()
             best = rand.choice(all_best)
             ensemble_loss = losses[best]
 

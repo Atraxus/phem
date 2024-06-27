@@ -44,8 +44,7 @@ from sklearn.utils.validation import _check_sample_weight
 
 from sklearn.metrics._base import (
     _average_binary_score,
-    _average_multiclass_ovo_score,
-    _check_pos_label_consistency,
+    _average_multiclass_ovo_score
 )
 
 
@@ -617,6 +616,37 @@ def roc_curve(
 
     return fpr, tpr, thresholds
 
+def _ensure_valid_pos_label(pos_label, y_true):
+    """
+    Ensure that the pos_label is a valid label within y_true.
+    
+    Parameters
+    ----------
+    pos_label : int, str or None
+        The label of the positive class. If None, infer the positive class
+        as the class that is not the majority class (smallest class by count).
+    
+    y_true : ndarray
+        True class labels.
+    
+    Returns
+    -------
+    valid_pos_label : int or str
+        The validated label of the positive class.
+    """
+    unique_labels = np.unique(y_true)
+    if pos_label is None:
+        if unique_labels.size > 2:
+            raise ValueError("pos_label must be specified for multiclass targets")
+        # Automatically determine the positive label as the minority class
+        counts = np.bincount(y_true)
+        valid_pos_label = unique_labels[np.argmin(counts)]
+    else:
+        if pos_label not in unique_labels:
+            raise ValueError("pos_label={} is not a valid label: {}".format(pos_label, unique_labels))
+        valid_pos_label = pos_label
+    return valid_pos_label
+
 
 def _binary_clf_curve(y_true, y_score, pos_label=None, sample_weight=None):
     """Calculate true and false positives per binary classification threshold.
@@ -672,7 +702,7 @@ def _binary_clf_curve(y_true, y_score, pos_label=None, sample_weight=None):
         y_score = y_score[nonzero_weight_mask]
         sample_weight = sample_weight[nonzero_weight_mask]
 
-    pos_label = _check_pos_label_consistency(pos_label, y_true)
+    pos_label = _ensure_valid_pos_label(pos_label, y_true)
 
     # make y_true a boolean vector
     y_true = y_true == pos_label
