@@ -120,53 +120,23 @@ class EnsembleSelection(AbstractWeightedEnsemble):
         # Pre-build the times array from the base models' metadata
         times = np.array([model.model_metadata['val_predict_time'] for model in self.base_models])
 
-
+        print(f"Calculate combined scores for time weight {self.time_weight} and {self.loss_weight}")
         for _i in range(ensemble_size):
-            # print(i)
-            s = len(ensemble)
-            if s > 0:
-                np.add(
-                    weighted_ensemble_prediction,
-                    ensemble[-1],
-                    out=weighted_ensemble_prediction,
-                )
-
-            # -- Process Iteration Solutions
+            # Process Iteration Solutions
             if self._use_mp:
                 losses = self._compute_losses_mp(
-                    weighted_ensemble_prediction, labels, predictions, s
+                    weighted_ensemble_prediction, labels, predictions, len(ensemble)
                 )
             else:
-                losses = np.zeros(
-                    (len(predictions)),
-                    dtype=np.float64,
-                )
+                losses = np.zeros((len(predictions)), dtype=np.float64)
 
-                # Memory-efficient averaging!
                 for j, pred in enumerate(predictions):
-                    # fant_ensemble_prediction is the prediction of the current ensemble
-                    # and should be ([predictions[selected_prev_iterations] + predictions[j])/(s+1)
-                    # We overwrite the contents of fant_ensemble_prediction
-                    # directly with weighted_ensemble_prediction + new_prediction and then scale for avg
-                    np.add(
-                        weighted_ensemble_prediction,
-                        pred,
-                        out=fant_ensemble_prediction,
-                    )
-                    np.multiply(
-                        fant_ensemble_prediction,
-                        (1.0 / float(s + 1)),
-                        out=fant_ensemble_prediction,
-                    )
+                    # Calculate fant_ensemble_prediction as the average of the current ensemble plus the new prediction
+                    np.add(weighted_ensemble_prediction, pred, out=fant_ensemble_prediction)
+                    np.multiply(fant_ensemble_prediction, (1.0 / float(len(ensemble) + 1)), out=fant_ensemble_prediction)
 
                     losses[j] = self.metric(labels, fant_ensemble_prediction, to_loss=True)
-            # print("LOSSES ",losses)
 
-            # -- Eval Iteration results
-            # all_best = np.argwhere(losses == np.nanmin(losses)).flatten()
-            
-            # TEMP
-            
             normalized_losses = (losses - np.nanmin(losses)) / (np.nanmax(losses) - np.nanmin(losses))
             normalized_times = (times - np.nanmin(times)) / (np.nanmax(times) - np.nanmin(times))
             combined_scores = self.loss_weight * normalized_losses + self.time_weight * normalized_times
@@ -177,25 +147,22 @@ class EnsembleSelection(AbstractWeightedEnsemble):
             ensemble_loss = losses[best]
 
             ensemble.append(predictions[best])
-            # print("ENSEMBLE ", ensemble)
-            trajectory.append(ensemble_loss)
             order.append(best)
-            # print("order ", order)
 
-            # Build Correct Validation loss list
-            if (
-                not self.val_loss_over_iterations_
-                or self.val_loss_over_iterations_[-1] > ensemble_loss
-            ):
+            # Update the weighted_ensemble_prediction to include the best new prediction
+            np.add(weighted_ensemble_prediction, predictions[best], out=weighted_ensemble_prediction)
+
+            trajectory.append(ensemble_loss)
+
+            if not self.val_loss_over_iterations_ or self.val_loss_over_iterations_[-1] > ensemble_loss:
                 self.val_loss_over_iterations_.append(ensemble_loss)
             else:
                 self.val_loss_over_iterations_.append(self.val_loss_over_iterations_[-1])
 
-            # -- Handle special cases
+            # Handle special cases
             if len(predictions) == 1:
                 break
 
-            # If we find a perfect ensemble/model, stop early
             if ensemble_loss == 0:
                 break
 
