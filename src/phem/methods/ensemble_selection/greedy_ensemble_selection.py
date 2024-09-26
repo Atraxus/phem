@@ -120,7 +120,6 @@ class EnsembleSelection(AbstractWeightedEnsemble):
         # Pre-build the times array from the base models' metadata
         times = np.array([model.model_metadata['val_predict_time'] for model in self.base_models])
 
-        print(f"Calculate combined scores for time weight {self.time_weight} and {self.loss_weight}")
         for _i in range(ensemble_size):
             # Process Iteration Solutions
             if self._use_mp:
