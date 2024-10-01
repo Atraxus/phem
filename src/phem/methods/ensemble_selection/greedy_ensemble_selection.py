@@ -46,7 +46,7 @@ class EnsembleSelection(AbstractWeightedEnsemble):
         n_jobs: int = -1,
         random_state: int | np.random.RandomState | None = None,
         use_best: bool = True,
-        loss_weight: float = 1.0
+        loss_weight: float = 1.0,
     ) -> None:
         # base_models = base_models[:20]
         self.loss_weight = loss_weight
@@ -116,9 +116,9 @@ class EnsembleSelection(AbstractWeightedEnsemble):
             weighted_ensemble_prediction.shape,
             dtype=np.float64,
         )
-        
+
         # Pre-build the times array from the base models' metadata
-        times = np.array([model.model_metadata['val_predict_time'] for model in self.base_models])
+        times = np.array([model.model_metadata["val_predict_time"] for model in self.base_models])
 
         for _i in range(ensemble_size):
             # Process Iteration Solutions
@@ -132,13 +132,34 @@ class EnsembleSelection(AbstractWeightedEnsemble):
                 for j, pred in enumerate(predictions):
                     # Calculate fant_ensemble_prediction as the average of the current ensemble plus the new prediction
                     np.add(weighted_ensemble_prediction, pred, out=fant_ensemble_prediction)
-                    np.multiply(fant_ensemble_prediction, (1.0 / float(len(ensemble) + 1)), out=fant_ensemble_prediction)
+                    np.multiply(
+                        fant_ensemble_prediction,
+                        (1.0 / float(len(ensemble) + 1)),
+                        out=fant_ensemble_prediction,
+                    )
 
                     losses[j] = self.metric(labels, fant_ensemble_prediction, to_loss=True)
 
-            normalized_losses = (losses - np.nanmin(losses)) / (np.nanmax(losses) - np.nanmin(losses))
-            normalized_times = (times - np.nanmin(times)) / (np.nanmax(times) - np.nanmin(times))
-            combined_scores = self.loss_weight * normalized_losses + self.time_weight * normalized_times
+            if np.all(np.isnan(losses)):
+                raise ValueError("All losses are NaN. Check predictions or labels for validity.")
+
+            # Ensure no NaNs in times
+            if np.all(np.isnan(times)):
+                raise ValueError("All times are NaN. Check model metadata for correctness.")
+
+            normalized_losses = (
+                (losses - np.nanmin(losses)) / (np.nanmax(losses) - np.nanmin(losses))
+                if np.nanmax(losses) != np.nanmin(losses)
+                else np.zeros_like(losses)
+            )
+            normalized_times = (
+                (times - np.nanmin(times)) / (np.nanmax(times) - np.nanmin(times))
+                if np.nanmax(times) != np.nanmin(times)
+                else np.zeros_like(times)
+            )
+            combined_scores = (
+                self.loss_weight * normalized_losses + self.time_weight * normalized_times
+            )
 
             min_combined_score = np.nanmin(combined_scores)
             all_best = np.argwhere(combined_scores == min_combined_score).flatten()
@@ -149,11 +170,16 @@ class EnsembleSelection(AbstractWeightedEnsemble):
             order.append(best)
 
             # Update the weighted_ensemble_prediction to include the best new prediction
-            np.add(weighted_ensemble_prediction, predictions[best], out=weighted_ensemble_prediction)
+            np.add(
+                weighted_ensemble_prediction, predictions[best], out=weighted_ensemble_prediction
+            )
 
             trajectory.append(ensemble_loss)
 
-            if not self.val_loss_over_iterations_ or self.val_loss_over_iterations_[-1] > ensemble_loss:
+            if (
+                not self.val_loss_over_iterations_
+                or self.val_loss_over_iterations_[-1] > ensemble_loss
+            ):
                 self.val_loss_over_iterations_.append(ensemble_loss)
             else:
                 self.val_loss_over_iterations_.append(self.val_loss_over_iterations_[-1])
